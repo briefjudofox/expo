@@ -1,3 +1,6 @@
+// apply from: project(":unimodules-core").file("../unimodules-core.gradle")
+apply from: '../scripts/autolinking.gradle'
+
 buildscript {
   repositories {
     google()
@@ -44,6 +47,14 @@ uploadArchives {
   }
 }
 
+task generatePackageList {
+  doLast {
+    generateUnimodulesPackageList()
+  }
+}
+
+preBuild.dependsOn generatePackageList
+
 android {
   compileSdkVersion safeExtGet("compileSdkVersion", 28)
 
@@ -56,15 +67,18 @@ android {
   lintOptions {
     abortOnError false
   }
+  sourceSets {
+    main {
+      java {
+         srcDirs += unimodules.getGeneratedSourceDir()
+      }
+    }
+  }
 }
 
-apply from: project(":unimodules-core").file("../unimodules-core.gradle")
-
 dependencies {
-  unimodule 'unimodules-core'
-  unimodule 'unimodules-font-interface'
-  unimodule 'unimodules-permissions-interface'
-  unimodule 'unimodules-image-loader-interface'
+  // Automatically add dependencies to all unimodules included by `unimodules.includeProjects` in `settings.gradle` file.
+  unimodules.addDependencies(project)
 
   implementation 'com.facebook.react:react-native:+'
 }
