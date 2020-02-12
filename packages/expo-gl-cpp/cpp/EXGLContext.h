@@ -250,13 +250,12 @@ class EXGLContext {
   }
 
  private:
-  template <typename F>
-  inline jsi::Value
-  getActiveInfo(jsi::Runtime &runtime, const jsi::Value *jsArgv, GLenum lengthParam, F &&glFunc);
+  using getActiveInfoFunc =
+      void (*)(GLuint, GLuint, GLsizei, GLsizei *, GLint *, GLenum *, GLchar *);
 
-  jsi::Value unimplemented(std::string name) {
-    throw std::runtime_error("EXGL: " + name + "() isn't implemented yet!");
-  }
+  inline jsi::Value getActiveInfo(jsi::Runtime &, UEXGLObjectId, GLuint, GLenum, getActiveInfoFunc);
+  inline bool glIsObject(UEXGLObjectId id, GLboolean func(GLuint));
+  inline jsi::Value glUnimplemented(std::string name);
 
   void installMethods(jsi::Runtime &runtime, jsi::Object &jsGl) {
     using namespace std::placeholders;
@@ -304,3 +303,5 @@ class EXGLContext {
 #undef NATIVE_METHOD
 #undef NATIVE_WEBGL2_METHOD
 };
+
+#include "EXGLContext-inl.h"

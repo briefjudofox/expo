@@ -52,20 +52,18 @@
 // -----------------
 
 // Wrapper raises an exception saying the function isn't implemented yet
-#define ARGS(...) unpackArgs<__VA_ARGS__>(runtime, jsArgv, argc)
-#define ARG(index, type) unpackArg<type>(runtime, jsArgv + index)
+#define ARG(index, type)                                  \
+  argc > index ? unpackArg<type>(runtime, jsArgv + index) \
+               : throw std::runtime_error("EXGL: Too few arguments")
 
 #define NATIVE_METHOD(name, ...)                 \
   jsi::Value EXGLContext::glNativeMethod_##name( \
-      jsi::Runtime &runtime,                     \
-      const jsi::Value &jsThis,                  \
-      const jsi::Value *jsArgv,                  \
-      size_t argc)
+      jsi::Runtime &runtime, const jsi::Value &jsThis, const jsi::Value *jsArgv, size_t argc)
 
-#define SIMPLE_NATIVE_METHOD(name, func, ...)                    \
-  NATIVE_METHOD(name) {                                          \
-    addToNextBatch(generateNativeMethod(runtime, func, jsArgv)); \
-    return nullptr;                                              \
+#define SIMPLE_NATIVE_METHOD(name, func, ...)                          \
+  NATIVE_METHOD(name) {                                                \
+    addToNextBatch(generateNativeMethod(runtime, func, jsArgv, argc)); \
+    return nullptr;                                                    \
   }
 
 #define UNIMPL_NATIVE_METHOD(name) \
@@ -139,7 +137,7 @@ SIMPLE_NATIVE_METHOD(enable, glEnable); // cap
 SIMPLE_NATIVE_METHOD(frontFace, glFrontFace); // mode
 
 NATIVE_METHOD(getParameter) {
-  EXJS_UNPACK_ARGV(GLenum pname);
+  auto pname = ARG(0, GLenum);
 
   switch (pname) {
       // Float32Array[0]
@@ -274,23 +272,22 @@ NATIVE_METHOD(getError, 0) {
   return static_cast<double>(glResult);
 }
 
-SIMPLE_NATIVE_METHOD(hint, glHint, target, mode)
+SIMPLE_NATIVE_METHOD(hint, glHint); // target, mode
 
 NATIVE_METHOD(isEnabled, 1) {
-  EXJS_UNPACK_ARGV(GLenum cap);
+  auto cap = ARG(0, GLenum);
   GLboolean glResult;
   addBlockingToNextBatch([&] { glResult = glIsEnabled(cap); });
   return glResult == GL_TRUE;
 }
 
-SIMPLE_NATIVE_METHOD(lineWidth, glLineWidth, width)
+SIMPLE_NATIVE_METHOD(lineWidth, glLineWidth); // width
 
-NATIVE_METHOD(pixelStorei, 2) {
-  EXJS_UNPACK_ARGV(GLenum pname);
+NATIVE_METHOD(pixelStorei) {
+  auto pname = ARG(0, GLenum);
   switch (pname) {
     case GL_UNPACK_FLIP_Y_WEBGL: {
-      GLboolean param = jsValueToBool(runtime, jsArgv[1]);
-      unpackFLipY = param;
+      unpackFLipY = ARG(1, GLboolean);
       break;
     }
     default:
@@ -318,39 +315,45 @@ SIMPLE_NATIVE_METHOD(stencilOpSeparate, glStencilOpSeparate, face, fail, zfail, 
 // Buffers
 // -------
 
-NATIVE_METHOD(bindBuffer, 2) {
-  EXJS_UNPACK_ARGV(GLenum target);
-  UEXGLObjectId fBuffer = jsArgv[1].isNull() ? 0 : jsArgv[1].asNumber();
-  addToNextBatch([=] { glBindBuffer(target, fBuffer == 0 ? 0 : lookupObject(fBuffer)); });
+NATIVE_METHOD(bindBuffer) {
+  auto target = ARG(0, GLenum);
+  auto buffer = ARG(1, UEXGLObjectId);
+  addToNextBatch([this, target = target, buffer = buffer] {
+    glBindBuffer(target, buffer == 0 ? 0 : lookupObject(buffer));
+  });
   return nullptr;
 }
 
 NATIVE_METHOD(bufferData, 3) {
-  GLenum target = jsArgv[0].asNumber();
-  const jsi::Value &sizeOrData = jsArgv[1];
-  GLenum usage = jsArgv[2].asNumber();
+  auto target = ARG(0, GLenum);
+  auto &sizeOrData = ARG(1, const jsi::Value &);
+  auto usage = ARG(2, GLenum);
 
   if (sizeOrData.isNumber()) {
     GLsizeiptr length = sizeOrData.getNumber();
     addToNextBatch([=] { glBufferData(target, length, nullptr, usage); });
-  } else if (sizeOrData.isNull()) {
+  } else if (sizeOrData.isNull() || sizeOrData.isUndefined()) {
     addToNextBatch([=] { glBufferData(target, 0, nullptr, usage); });
   } else if (sizeOrData.isObject()) {
     auto data = rawArrayBuffer(runtime, sizeOrData.getObject(runtime));
-    addToNextBatch([=] { glBufferData(target, data.size(), data.data(), usage); });
+    addToNextBatch(
+        [=, data{std::move(data)}] { glBufferData(target, data.size(), data.data(), usage); });
   }
   return nullptr;
 }
 
-NATIVE_METHOD(bufferSubData, 3) {
-  EXJS_UNPACK_ARGV(GLenum target, GLintptr offset);
-  const jsi::Value &jsData = jsArgv[2];
-  auto data = rawArrayBuffer(runtime, jsArgv[2].asObject(runtime));
-  addToNextBatch([=] { glBufferSubData(target, offset, data.size(), data.data()); });
+NATIVE_METHOD(bufferSubData) {
+  auto target = ARG(0, GLenum);
+  auto offset = ARG(1, GLintptr);
+  auto jsData = ARG(2, jsi::Object);
+  auto data = rawArrayBuffer(runtime, jsData);
+  addToNextBatch([data, target = target, offset = offset] {
+    glBufferSubData(target, offset, data.size(), data.data());
+  });
   return nullptr;
 }
 
-NATIVE_METHOD(createBuffer, 0) {
+NATIVE_METHOD(createBuffer) {
   return addFutureToNextBatch(runtime, [] {
     GLuint buffer;
     glGenBuffers(1, &buffer);
@@ -358,8 +361,8 @@ NATIVE_METHOD(createBuffer, 0) {
   });
 }
 
-NATIVE_METHOD(deleteBuffer, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fBuffer);
+NATIVE_METHOD(deleteBuffer) {
+  auto fBuffer = ARG(0, UEXGLObjectId);
   addToNextBatch([=] {
     GLuint buffer = lookupObject(fBuffer);
     glDeleteBuffers(1, &buffer);
@@ -367,25 +370,17 @@ NATIVE_METHOD(deleteBuffer, 1) {
   return nullptr;
 }
 
-NATIVE_METHOD(getBufferParameter, 2) {
-  EXJS_UNPACK_ARGV(GLenum target, GLenum pname);
+NATIVE_METHOD(getBufferParameter) {
+  auto target = ARG(0, GLenum);
+  auto pname = ARG(1, GLenum);
   GLint glResult;
   addBlockingToNextBatch([&] { glGetBufferParameteriv(target, pname, &glResult); });
   return jsi::Value(glResult);
 }
 
-#define _WRAP_METHOD_IS_OBJECT_INTERNAL(type, requiresWebGL2)                \
-  NATIVE_METHOD(is##type) {                                                  \
-    EXJS_UNPACK_ARGV(UEXGLObjectId f);                                       \
-    GLboolean glResult;                                                      \
-    addBlockingToNextBatch([&] { glResult = glIs##type(lookupObject(f)); }); \
-    return glResult == GL_TRUE;                                              \
-  }
-
-#define _WRAP_METHOD_IS_OBJECT(type) _WRAP_METHOD_IS_OBJECT_INTERNAL(type, false)
-#define _WRAP_WEBGL2_METHOD_IS_OBJECT(type) _WRAP_METHOD_IS_OBJECT_INTERNAL(type, true)
-
-_WRAP_METHOD_IS_OBJECT(Buffer)
+NATIVE_METHOD(isBuffer) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsBuffer);
+}
 
 // Buffers (WebGL2)
 
@@ -404,13 +399,15 @@ UNIMPL_NATIVE_METHOD(getBufferSubData);
 // Framebuffers
 // ------------
 
-NATIVE_METHOD(bindFramebuffer, 2) {
-  EXJS_UNPACK_ARGV(GLenum target);
-  if (jsArgv[1].isNull()) {
+NATIVE_METHOD(bindFramebuffer) {
+  auto target = ARG(0, GLenum);
+  auto &framebuffer = ARG(1, const jsi::Value &);
+  if (framebuffer.isNull() || framebuffer.isUndefined()) {
     addToNextBatch([=] { glBindFramebuffer(target, defaultFramebuffer); });
   } else {
-    UEXGLObjectId fFramebuffer = jsArgv[1].asNumber();
-    addToNextBatch([=] { glBindFramebuffer(target, lookupObject(fFramebuffer)); });
+    addToNextBatch([=, framebuffer = framebuffer.asNumber()] {
+      glBindFramebuffer(target, lookupObject(framebuffer));
+    });
   }
   return nullptr;
 }
@@ -460,7 +457,9 @@ NATIVE_METHOD(framebufferTexture2D, 5) {
 
 UNIMPL_NATIVE_METHOD(getFramebufferAttachmentParameter)
 
-_WRAP_METHOD_IS_OBJECT(Framebuffer)
+NATIVE_METHOD(isFramebuffer) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsFramebuffer);
+}
 
 NATIVE_METHOD(readPixels, 7) {
   EXJS_UNPACK_ARGV(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type);
@@ -557,7 +556,9 @@ NATIVE_METHOD(deleteRenderbuffer, 1) {
 
 UNIMPL_NATIVE_METHOD(getRenderbufferParameter)
 
-_WRAP_METHOD_IS_OBJECT(Renderbuffer)
+NATIVE_METHOD(isRenderbuffer) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsRenderbuffer);
+}
 
 NATIVE_METHOD(renderbufferStorage, 4) {
   EXJS_UNPACK_ARGV(GLenum target, GLint internalformat, GLsizei width, GLsizei height);
@@ -635,7 +636,9 @@ SIMPLE_NATIVE_METHOD(generateMipmap, glGenerateMipmap, target)
 
 UNIMPL_NATIVE_METHOD(getTexParameter)
 
-_WRAP_METHOD_IS_OBJECT(Texture)
+NATIVE_METHOD(isTexture) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsTexture);
+}
 
 NATIVE_METHOD(texImage2D, 6) {
   GLenum target;
@@ -1036,9 +1039,13 @@ NATIVE_METHOD(getShaderSource, 1) {
   return jsi::String::createFromUtf8(runtime, str);
 }
 
-_WRAP_METHOD_IS_OBJECT(Program)
+NATIVE_METHOD(isShader) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsShader);
+}
 
-_WRAP_METHOD_IS_OBJECT(Shader)
+NATIVE_METHOD(isProgram) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsProgram);
+}
 
 NATIVE_METHOD(linkProgram, 1) {
   EXJS_UNPACK_ARGV(UEXGLObjectId fProgram);
@@ -1090,47 +1097,22 @@ SIMPLE_NATIVE_METHOD(disableVertexAttribArray, glDisableVertexAttribArray, index
 
 SIMPLE_NATIVE_METHOD(enableVertexAttribArray, glEnableVertexAttribArray, index)
 
-template <typename F>
-inline jsi::Value EXGLContext::getActiveInfo(
-    jsi::Runtime &runtime,
-    const jsi::Value *jsArgv,
-    GLenum lengthParam,
-    F &&glFunc) {
-  if (jsArgv[0].isNull()) {
-    return nullptr;
-  }
-
-  EXJS_UNPACK_ARGV(UEXGLObjectId fProgram, GLuint index);
-
-  GLsizei length;
-  GLint size;
-  GLenum type;
-  std::string name;
-  GLint maxNameLength;
-  addBlockingToNextBatch([&] {
-    GLuint program = lookupObject(fProgram);
-    glGetProgramiv(program, lengthParam, &maxNameLength);
-    name.resize(maxNameLength);
-    glFunc(program, index, maxNameLength, &length, &size, &type, &name[0]);
-  });
-
-  if (strlen(name.c_str()) == 0) { // name.length() may be larger
-    return jsi::Value::null();
-  }
-
-  jsi::Object jsResult(runtime);
-  jsResult.setProperty(runtime, "name", jsi::String::createFromAscii(runtime, name.c_str()));
-  jsResult.setProperty(runtime, "size", size);
-  jsResult.setProperty(runtime, "type", static_cast<double>(type));
-  return jsResult;
-}
-
 NATIVE_METHOD(getActiveAttrib, 2) {
-  return getActiveInfo(runtime, jsArgv, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, glGetActiveAttrib);
+  return getActiveInfo(
+      runtime,
+      ARG(0, UEXGLObjectId),
+      ARG(1, GLuint),
+      GL_ACTIVE_ATTRIBUTE_MAX_LENGTH,
+      glGetActiveAttrib);
 }
 
 NATIVE_METHOD(getActiveUniform, 2) {
-  return getActiveInfo(runtime, jsArgv, GL_ACTIVE_UNIFORM_MAX_LENGTH, glGetActiveUniform);
+  return getActiveInfo(
+      runtime,
+      ARG(0, UEXGLObjectId),
+      ARG(1, GLuint),
+      GL_ACTIVE_UNIFORM_MAX_LENGTH,
+      glGetActiveUniform);
 }
 
 NATIVE_METHOD(getAttribLocation, 2) {
@@ -1363,7 +1345,9 @@ NATIVE_METHOD(deleteQuery, 1) {
   return nullptr;
 }
 
-_WRAP_WEBGL2_METHOD_IS_OBJECT(Query)
+NATIVE_METHOD(isQuery) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsQuery);
+}
 
 NATIVE_METHOD(beginQuery, 2) {
   EXJS_UNPACK_ARGV(GLenum target, UEXGLObjectId query);
@@ -1413,7 +1397,9 @@ NATIVE_METHOD(bindSampler, 2) {
   return nullptr;
 }
 
-_WRAP_WEBGL2_METHOD_IS_OBJECT(Sampler)
+NATIVE_METHOD(isSampler) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsSampler);
+}
 
 NATIVE_METHOD(samplerParameteri, 3) {
   EXJS_UNPACK_ARGV(UEXGLObjectId sampler, GLenum pname, GLint param);
@@ -1480,7 +1466,9 @@ NATIVE_METHOD(deleteTransformFeedback, 1) {
   return nullptr;
 }
 
-_WRAP_WEBGL2_METHOD_IS_OBJECT(TransformFeedback)
+NATIVE_METHOD(isTransformFeedback) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsTransformFeedback);
+}
 
 NATIVE_METHOD(bindTransformFeedback, 1) {
   EXJS_UNPACK_ARGV(GLenum target, UEXGLObjectId transformFeedback);
@@ -1638,7 +1626,9 @@ NATIVE_METHOD(deleteVertexArray, 1) {
   return nullptr;
 }
 
-_WRAP_WEBGL2_METHOD_IS_OBJECT(VertexArray)
+NATIVE_METHOD(isVertexArray) {
+  return glIsObject(ARG(0, UEXGLObjectId), glIsVertexArray);
+}
 
 NATIVE_METHOD(bindVertexArray, 1) {
   EXJS_UNPACK_ARGV(UEXGLObjectId vertexArray);

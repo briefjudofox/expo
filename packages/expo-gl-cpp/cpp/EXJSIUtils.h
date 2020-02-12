@@ -45,10 +45,14 @@ inline bool jsValueToBool(jsi::Runtime &runtime, const jsi::Value &jsValue) {
 }
 
 template <typename Func>
-inline void setFunctionOnObject(jsi::Runtime& runtime, jsi::Object& jsObject, const std::string& name, Func func) {
-    auto jsName = jsi::PropNameID::forUtf8(runtime, name);
-    jsObject.setProperty(
-            runtime, jsName, jsi::Function::createFromHostFunction(runtime, jsName, 0, func));
+inline void setFunctionOnObject(
+    jsi::Runtime &runtime,
+    jsi::Object &jsObject,
+    const std::string &name,
+    Func func) {
+  auto jsName = jsi::PropNameID::forUtf8(runtime, name);
+  jsObject.setProperty(
+      runtime, jsName, jsi::Function::createFromHostFunction(runtime, jsName, 0, func));
 }
 
 inline void jsConsoleLog(jsi::Runtime &runtime, const std::string &msg) {

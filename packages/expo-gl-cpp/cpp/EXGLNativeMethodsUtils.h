@@ -1,5 +1,15 @@
 #pragma once
 
+#ifdef __ANDROID__
+#include <GLES3/gl3.h>
+#include <GLES3/gl3ext.h>
+#endif
+#ifdef __APPLE__
+#include <OpenGLES/EAGL.h>
+#include <OpenGLES/ES3/gl.h>
+#include <OpenGLES/ES3/glext.h>
+#endif
+
 #include <jsi/jsi.h>
 #include <type_traits>
 
@@ -11,8 +21,8 @@ namespace jsi = facebook::jsi;
 //
 // Why we need to mix explicit specializations and function overloads?
 // On the one hand we need to provide implementations for a range of types (e.g. all integers,
-// all floats) so we can't do this with explicit specializations only, on the other hand we can't use 
-// only function overloads because only difference in signature is caused by return type which 
+// all floats) so we can't do this with explicit specializations only, on the other hand we can't
+// use only function overloads because only difference in signature is caused by return type which
 // does not affect overloading.
 //
 // To prevent ambiguity all specializations should be directly under first unimplemented declaration
@@ -20,7 +30,8 @@ namespace jsi = facebook::jsi;
 //
 
 template <typename T>
-inline constexpr bool is_integral_v = std::is_integral_v<T> && !std::is_same_v<bool, T>;
+inline constexpr bool is_integral_v =
+    std::is_integral_v<T> && !std::is_same_v<bool, T> && !std::is_same_v<GLboolean, T>;
 
 template <typename T>
 inline std::enable_if_t<!(is_integral_v<T> || std::is_floating_point_v<T>), T> unpackArg(
@@ -41,6 +52,18 @@ inline bool unpackArg<bool>(jsi::Runtime &runtime, const jsi::Value *jsArgv) {
     return jsArgv->getNumber() != 0;
   }
   throw std::runtime_error("value is not a boolean");
+}
+
+template <>
+inline GLboolean unpackArg<GLboolean>(jsi::Runtime &runtime, const jsi::Value *jsArgv) {
+  return unpackArg<bool>(runtime, jsArgv) ? GL_TRUE : GL_FALSE;
+}
+
+template <>
+inline const jsi::Value &unpackArg<const jsi::Value &>(
+    jsi::Runtime &runtime,
+    const jsi::Value *jsArgv) {
+  return *jsArgv;
 }
 
 template <>
@@ -75,13 +98,23 @@ template <typename T>
 inline std::enable_if_t<is_integral_v<T>, T> unpackArg(
     jsi::Runtime &runtime,
     const jsi::Value *jsArgv) {
-  return jsArgv->asNumber(); // TODO: add api to jsi to handle integers more efficiently
+  if (jsArgv->isNumber()) {
+    return jsArgv->getNumber(); // TODO: add api to jsi to handle integers more efficiently
+  } else if (jsArgv->isNull() || jsArgv->isUndefined()) {
+    return 0;
+  }
+  return jsArgv->asNumber();
 }
 
 template <typename T>
 inline std::enable_if_t<std::is_floating_point_v<T>, T> unpackArg(
     jsi::Runtime &runtime,
     const jsi::Value *jsArgv) {
+  if (jsArgv->isNumber()) {
+    return jsArgv->getNumber();
+  } else if (jsArgv->isNull() || jsArgv->isUndefined()) {
+    return 0;
+  }
   return jsArgv->asNumber();
 }
 
@@ -101,21 +134,21 @@ struct Arg {
 template <typename First, typename... T>
 constexpr std::tuple<Arg<First>, Arg<T>...> toArgTuple(const jsi::Value *jsArgv) {
   if constexpr (sizeof...(T) >= 1) {
-    return std::tuple_cat(std::make_tuple(Arg<First>{jsArgv}), toArgTuple<T...>(jsArgv + 1));
+    return std::tuple_cat(std::tuple(Arg<First>{jsArgv}), toArgTuple<T...>(jsArgv + 1));
   } else {
-    return std::make_tuple(Arg<First>{jsArgv});
+    return std::tuple(Arg<First>{jsArgv});
   }
 }
 
 // We need to unpack this in separate step because unpackArg
 // used in Arg class is not an constexpr.
 template <typename Tuple, size_t... I>
-auto unpackArgsTuple(jsi::Runtime &runtime, Tuple tuple, std::index_sequence<I...>) {
+auto unpackArgsTuple(jsi::Runtime &runtime, Tuple &&tuple, std::index_sequence<I...>) {
   return std::make_tuple(std::get<I>(tuple).unpack(runtime)...);
 }
 
 template <typename Tuple, typename F, size_t... I>
-auto generateNativeMethodBind(F fn, Tuple tuple, std::index_sequence<I...>) {
+auto generateNativeMethodBind(F fn, Tuple &&tuple, std::index_sequence<I...>) {
   return std::bind(fn, std::get<I>(tuple)...);
 }
 
@@ -131,28 +164,39 @@ auto generateNativeMethodBind(F fn, Tuple tuple, std::index_sequence<I...>) {
 // used in EXGLNativeMethods wrapped in ARGS macro
 //
 template <typename... T>
-inline std::tuple<T...> unpackArgs(jsi::Runtime &runtime, const jsi::Value *jsArgv, int argc) {
-  // create tuple of Arg<T> structs containg pointer to unprocessed argument
+inline std::tuple<T...> unpackArgs(jsi::Runtime &runtime, const jsi::Value *jsArgv, size_t argc) {
+  if (argc < sizeof...(T)) {
+    throw std::runtime_error("EXGL: Too few arguments");
+  }
+  // create tuple of Arg<T> structs containg pointer to unprocessed arguments
   auto argTuple = methodHelper::toArgTuple<T...>(jsArgv);
 
   // transform tuple by running unpackArg<T>() on every element
-  return methodHelper::unpackArgsTuple(runtime, argTuple, std::make_index_sequence<sizeof...(T)>());
+  return methodHelper::unpackArgsTuple(
+      runtime, std::move(argTuple), std::make_index_sequence<sizeof...(T)>());
 }
 
 //
 // converts jsi::Value's passed to js method into c++ values based on type of declaration
 // of OpenGl function
-// e.g.
+//
+// e.g. usage
 // NATIVE_METHOD(scissor) {
 //   addToNextBatch(generateNativeMethod(runtime, glScissor, jsArgv, argc));
 //   return nullptr;
 // }
+// used in EXGLNativeMethods wrapped in SIMPLE_NATIVE_METHOD macro
+//
 template <typename... T>
-auto generateNativeMethod(jsi::Runtime &runtime, void fn(T...), const jsi::Value *jsArgv) {
-  // generate tuple of arguements of correct type
-  auto argTuple = unpackArgs<T...>(runtime, jsArgv, sizeof...(T));
-  
-  // bind tuple values as consecutive function arguements
+auto generateNativeMethod(
+    jsi::Runtime &runtime,
+    void fn(T...),
+    const jsi::Value *jsArgv,
+    size_t argc) {
+  // generate tuple of arguments of correct type
+  auto argTuple = unpackArgs<T...>(runtime, jsArgv, argc);
+
+  // bind tuple values as consecutive function arguments
   return methodHelper::generateNativeMethodBind(
-      fn, argTuple, std::make_index_sequence<sizeof...(T)>());
+      fn, std::move(argTuple), std::make_index_sequence<sizeof...(T)>());
 }
