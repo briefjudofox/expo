@@ -153,16 +153,6 @@ module.exports = {
     'import/first': 'warn',
     'import/namespace': ['error', { allowComputed: true }],
     'import/no-duplicates': 'error',
-    'import/order': [
-      'warn',
-      {
-        groups: [['builtin', 'external'], 'internal', ['parent', 'index', 'sibling']],
-        'newlines-between': 'always',
-        alphabetize: {
-          order: 'asc',
-        },
-      },
-    ],
   },
   settings: {
     'import/extensions': jsExtensions,
@@ -173,4 +163,21 @@ module.exports = {
       node: { extensions: jsExtensions },
     },
   },
+  overrides: [
+    {
+      files: [...jsExtensions, '*[^(.d)].ts', '*.tsx'],
+      rules: {
+        'import/order': [
+          'warn',
+          {
+            groups: [['builtin', 'external'], 'internal', ['parent', 'index', 'sibling']],
+            'newlines-between': 'always',
+            alphabetize: {
+              order: 'asc',
+            },
+          },
+        ],
+      },
+    },
+  ],
 };

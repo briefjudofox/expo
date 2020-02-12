@@ -1,9 +1,9 @@
 'use strict';
 
 const isEqual = require('lodash/isEqual');
+const jestPreset = require('react-native/jest-preset');
 
 // Derive the Expo Jest preset from the React Native one
-const jestPreset = require('react-native/jest-preset');
 
 // transform
 if (!jestPreset.transform) {
