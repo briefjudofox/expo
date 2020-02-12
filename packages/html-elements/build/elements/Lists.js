@@ -1,8 +1,8 @@
 import React, { forwardRef } from 'react';
 import { StyleSheet } from 'react-native';
-import View from '../primitives/View';
-import Text from '../primitives/Text';
 import { em } from '../css/units';
+import Text from '../primitives/Text';
+import View from '../primitives/View';
 export const UL = forwardRef((props, ref) => {
     const { children } = props;
     const elements = React.Children.toArray(children).map(element => {

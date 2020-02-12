@@ -1,6 +1,6 @@
 import { CodedError } from '@unimodules/core';
-import { NotificationBehavior } from './NotificationsHandlerModule';
 import { Notification } from './NotificationsEmitter.types';
+import { NotificationBehavior } from './NotificationsHandlerModule';
 export declare class NotificationTimeoutError extends CodedError {
     info: {
         notification: Notification;
