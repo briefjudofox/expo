@@ -1,5 +1,6 @@
 import React, { ComponentType, forwardRef } from 'react';
 import { Platform } from 'react-native';
+
 import View, { ViewProps } from '../primitives/View';
 
 const nativeProps: ViewProps = Platform.select({
