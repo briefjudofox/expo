@@ -52,6 +52,7 @@
 // -----------------
 
 // Wrapper raises an exception saying the function isn't implemented yet
+#define ARGS(...) unpackArgs<__VA_ARGS__>(runtime, jsArgv, argc)
 #define ARG(index, type)                                  \
   argc > index ? unpackArg<type>(runtime, jsArgv + index) \
                : throw std::runtime_error("EXGL: Too few arguments")
@@ -68,7 +69,7 @@
 
 #define UNIMPL_NATIVE_METHOD(name) \
   NATIVE_METHOD(name) {            \
-    return unimplemented(#name);   \
+    return glUnimplemented(#name); \
   }
 
 // This listing follows the order in
@@ -266,7 +267,7 @@ NATIVE_METHOD(getParameter) {
   }
 }
 
-NATIVE_METHOD(getError, 0) {
+NATIVE_METHOD(getError) {
   GLenum glResult;
   addBlockingToNextBatch([&] { glResult = glGetError(); });
   return static_cast<double>(glResult);
@@ -274,7 +275,7 @@ NATIVE_METHOD(getError, 0) {
 
 SIMPLE_NATIVE_METHOD(hint, glHint); // target, mode
 
-NATIVE_METHOD(isEnabled, 1) {
+NATIVE_METHOD(isEnabled) {
   auto cap = ARG(0, GLenum);
   GLboolean glResult;
   addBlockingToNextBatch([&] { glResult = glIsEnabled(cap); });
@@ -306,11 +307,11 @@ SIMPLE_NATIVE_METHOD(stencilFuncSeparate, glStencilFuncSeparate); // face, func,
 
 SIMPLE_NATIVE_METHOD(stencilMask, glStencilMask); // mask
 
-SIMPLE_NATIVE_METHOD(stencilMaskSeparate, glStencilMaskSeparate, face, mask)
+SIMPLE_NATIVE_METHOD(stencilMaskSeparate, glStencilMaskSeparate); // face, mask
 
-SIMPLE_NATIVE_METHOD(stencilOp, glStencilOp, fail, zfail, zpass)
+SIMPLE_NATIVE_METHOD(stencilOp, glStencilOp) // fail, zfail, zpass
 
-SIMPLE_NATIVE_METHOD(stencilOpSeparate, glStencilOpSeparate, face, fail, zfail, zpass)
+SIMPLE_NATIVE_METHOD(stencilOpSeparate, glStencilOpSeparate); // face, fail, zfail, zpass
 
 // Buffers
 // -------
@@ -324,7 +325,7 @@ NATIVE_METHOD(bindBuffer) {
   return nullptr;
 }
 
-NATIVE_METHOD(bufferData, 3) {
+NATIVE_METHOD(bufferData) {
   auto target = ARG(0, GLenum);
   auto &sizeOrData = ARG(1, const jsi::Value &);
   auto usage = ARG(2, GLenum);
@@ -354,19 +355,11 @@ NATIVE_METHOD(bufferSubData) {
 }
 
 NATIVE_METHOD(createBuffer) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint buffer;
-    glGenBuffers(1, &buffer);
-    return buffer;
-  });
+  return glGenObject(runtime, glGenBuffers);
 }
 
 NATIVE_METHOD(deleteBuffer) {
-  auto fBuffer = ARG(0, UEXGLObjectId);
-  addToNextBatch([=] {
-    GLuint buffer = lookupObject(fBuffer);
-    glDeleteBuffers(1, &buffer);
-  });
+  glDeleteObject(ARG(0, UEXGLObjectId), glDeleteBuffers);
   return nullptr;
 }
 
@@ -384,14 +377,8 @@ NATIVE_METHOD(isBuffer) {
 
 // Buffers (WebGL2)
 
-SIMPLE_NATIVE_METHOD(
-    copyBufferSubData,
-    glCopyBufferSubData,
-    readTarget,
-    writeTarget,
-    readOffset,
-    writeOffset,
-    size)
+SIMPLE_NATIVE_METHOD(copyBufferSubData, glCopyBufferSubData)
+// readTarget, writeTarget, readOffset, writeOffset, size
 
 // glGetBufferSubData is not available in OpenGL ES
 UNIMPL_NATIVE_METHOD(getBufferSubData);
@@ -412,33 +399,27 @@ NATIVE_METHOD(bindFramebuffer) {
   return nullptr;
 }
 
-NATIVE_METHOD(checkFramebufferStatus, 1) {
-  EXJS_UNPACK_ARGV(GLenum target);
+NATIVE_METHOD(checkFramebufferStatus) {
+  auto target = ARG(0, GLenum);
   GLenum glResult;
   addBlockingToNextBatch([&] { glResult = glCheckFramebufferStatus(target); });
   return static_cast<double>(glResult);
 }
 
-NATIVE_METHOD(createFramebuffer, 0) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint framebuffer;
-    glGenFramebuffers(1, &framebuffer);
-    return static_cast<double>(framebuffer);
-  });
+NATIVE_METHOD(createFramebuffer) {
+  return glGenObject(runtime, glGenFramebuffers);
 }
 
-NATIVE_METHOD(deleteFramebuffer, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fFramebuffer);
-  addToNextBatch([=] {
-    GLuint framebuffer = lookupObject(fFramebuffer);
-    glDeleteFramebuffers(1, &framebuffer);
-  });
+NATIVE_METHOD(deleteFramebuffer) {
+  glDeleteObject(ARG(0, UEXGLObjectId), glDeleteFramebuffers);
   return nullptr;
 }
 
-NATIVE_METHOD(framebufferRenderbuffer, 4) {
-  EXJS_UNPACK_ARGV(
-      GLenum target, GLenum attachment, GLenum renderbuffertarget, UEXGLObjectId fRenderbuffer);
+NATIVE_METHOD(framebufferRenderbuffer) {
+  auto target = ARG(0, GLenum);
+  auto attachment = ARG(1, GLenum);
+  auto renderbuffertarget = ARG(2, GLenum);
+  auto fRenderbuffer = ARG(3, UEXGLObjectId);
   addToNextBatch([=] {
     GLuint renderbuffer = lookupObject(fRenderbuffer);
     glFramebufferRenderbuffer(target, attachment, renderbuffertarget, renderbuffer);
@@ -447,8 +428,11 @@ NATIVE_METHOD(framebufferRenderbuffer, 4) {
 }
 
 NATIVE_METHOD(framebufferTexture2D, 5) {
-  EXJS_UNPACK_ARGV(
-      GLenum target, GLenum attachment, GLenum textarget, UEXGLObjectId fTexture, GLint level);
+  auto target = ARG(0, GLenum);
+  auto attachment = ARG(1, GLenum);
+  auto textarget = ARG(2, GLenum);
+  auto fTexture = ARG(3, UEXGLObjectId);
+  auto level = ARG(4, GLint);
   addToNextBatch([=] {
     glFramebufferTexture2D(target, attachment, textarget, lookupObject(fTexture), level);
   });
@@ -461,8 +445,13 @@ NATIVE_METHOD(isFramebuffer) {
   return glIsObject(ARG(0, UEXGLObjectId), glIsFramebuffer);
 }
 
-NATIVE_METHOD(readPixels, 7) {
-  EXJS_UNPACK_ARGV(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type);
+NATIVE_METHOD(readPixels) {
+  auto x = ARG(0, GLint);
+  auto y = ARG(1, GLint);
+  auto width = ARG(2, GLsizei);
+  auto height = ARG(3, GLsizei);
+  auto format = ARG(4, GLenum);
+  auto type = ARG(5, GLenum);
   size_t byteLength = width * height * bytesPerPixel(type, format);
   auto pixels = std::vector<uint8_t>(byteLength);
   addBlockingToNextBatch([&] { glReadPixels(x, y, width, height, format, type, pixels.data()); });
@@ -475,19 +464,8 @@ NATIVE_METHOD(readPixels, 7) {
 // Framebuffers (WebGL2)
 // ---------------------
 
-SIMPLE_NATIVE_METHOD(
-    blitFramebuffer,
-    glBlitFramebuffer,
-    srcX0,
-    srcY0,
-    srcX1,
-    srcY1,
-    dstX0,
-    dstY0,
-    dstX1,
-    dstY1,
-    mask,
-    filter)
+SIMPLE_NATIVE_METHOD(blitFramebuffer, glBlitFramebuffer);
+// srcX0, srcY0, srcX1, srcY1, dstX0, dstY0, dstX1, dstY1, mask, filter
 
 NATIVE_METHOD(framebufferTextureLayer, 5) {
   EXJS_UNPACK_ARGV(
@@ -537,20 +515,12 @@ NATIVE_METHOD(bindRenderbuffer, 2) {
   return nullptr;
 }
 
-NATIVE_METHOD(createRenderbuffer, 0) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint renderbuffer;
-    glGenRenderbuffers(1, &renderbuffer);
-    return renderbuffer;
-  });
+NATIVE_METHOD(createRenderbuffer) {
+  return glGenObject(runtime, glGenRenderbuffers);
 }
 
-NATIVE_METHOD(deleteRenderbuffer, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fRenderbuffer);
-  addToNextBatch([=] {
-    GLuint renderbuffer = lookupObject(fRenderbuffer);
-    glDeleteRenderbuffers(1, &renderbuffer);
-  });
+NATIVE_METHOD(deleteRenderbuffer) {
+  glDeleteObject(ARG(0, UEXGLObjectId), glDeleteRenderbuffers);
   return nullptr;
 }
 
@@ -615,20 +585,12 @@ SIMPLE_NATIVE_METHOD(
     width,
     height)
 
-NATIVE_METHOD(createTexture, 0) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint texture;
-    glGenTextures(1, &texture);
-    return texture;
-  });
+NATIVE_METHOD(createTexture) {
+  return glGenObject(runtime, glGenTextures);
 }
 
-NATIVE_METHOD(deleteTexture, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fTexture);
-  addToNextBatch([=] {
-    GLuint texture = lookupObject(fTexture);
-    glDeleteTextures(1, &texture);
-  });
+NATIVE_METHOD(deleteTexture) {
+  glDeleteObject(ARG(0, UEXGLObjectId), glDeleteTextures);
   return nullptr;
 }
 
@@ -903,28 +865,26 @@ NATIVE_METHOD(compileShader, 1) {
   return nullptr;
 }
 
-NATIVE_METHOD(createProgram, 0) {
-  return addFutureToNextBatch(runtime, &glCreateProgram);
+NATIVE_METHOD(createProgram) {
+  return glCreateObject(runtime, glCreateProgram);
 }
 
-NATIVE_METHOD(createShader, 1) {
+NATIVE_METHOD(createShader) {
   EXJS_UNPACK_ARGV(GLenum type);
   if (type == GL_VERTEX_SHADER || type == GL_FRAGMENT_SHADER) {
-    return addFutureToNextBatch(runtime, std::bind(glCreateShader, type));
+    return glCreateObject(runtime, std::bind(glCreateShader, type));
   } else {
-    return jsi::Value::null();
+    throw std::runtime_error("unknown shader type passed to function");
   }
 }
 
-NATIVE_METHOD(deleteProgram, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fProgram);
-  addToNextBatch([=] { glDeleteProgram(lookupObject(fProgram)); });
+NATIVE_METHOD(deleteProgram) {
+  glDeleteObject(ARG(0, UEXGLContextId), glDeleteProgram);
   return nullptr;
 }
 
-NATIVE_METHOD(deleteShader, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fShader);
-  addToNextBatch([=] { glDeleteShader(lookupObject(fShader)); });
+NATIVE_METHOD(deleteShader) {
+  glDeleteObject(ARG(0, UEXGLContextId), glDeleteShader);
   return nullptr;
 }
 
@@ -1329,19 +1289,11 @@ SIMPLE_NATIVE_METHOD(clearBufferfi, glClearBufferfi, buffer, drawbuffer, depth, 
 // ----------------------
 
 NATIVE_METHOD(createQuery, 0) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint query;
-    glGenQueries(1, &query);
-    return query;
-  });
+  return glGenObject(runtime, glGenQueries);
 }
 
 NATIVE_METHOD(deleteQuery, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fQuery);
-  addToNextBatch([=] {
-    GLuint query = lookupObject(fQuery);
-    glDeleteQueries(1, &query);
-  });
+  glDeleteObject(ARG(0, UEXGLContextId), glDeleteQueries);
   return nullptr;
 }
 
@@ -1375,19 +1327,11 @@ NATIVE_METHOD(getQueryParameter, 2) {
 // -----------------
 
 NATIVE_METHOD(createSampler, 0) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint sampler;
-    glGenSamplers(1, &sampler);
-    return sampler;
-  });
+  return glGenObject(runtime, glGenSamplers);
 }
 
-NATIVE_METHOD(deleteSampler, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fSampler);
-  addToNextBatch([=] {
-    GLuint sampler = lookupObject(fSampler);
-    glDeleteSamplers(1, &sampler);
-  });
+NATIVE_METHOD(deleteSampler) {
+  glDeleteObject(ARG(0, UEXGLContextId), glDeleteSamplers);
   return nullptr;
 }
 
@@ -1450,19 +1394,11 @@ UNIMPL_NATIVE_METHOD(getSyncParameter)
 // ---------------------------
 
 NATIVE_METHOD(createTransformFeedback, 0) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint transformFeedback;
-    glGenTransformFeedbacks(1, &transformFeedback);
-    return transformFeedback;
-  });
+  return glGenObject(runtime, glGenTransformFeedbacks);
 }
 
-NATIVE_METHOD(deleteTransformFeedback, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fTransformFeedback);
-  addToNextBatch([=] {
-    GLuint transformFeedback = lookupObject(fTransformFeedback);
-    glDeleteTransformFeedbacks(1, &transformFeedback);
-  });
+NATIVE_METHOD(deleteTransformFeedback) {
+  glDeleteObject(ARG(0, UEXGLContextId), glDeleteTransformFeedbacks);
   return nullptr;
 }
 
@@ -1504,7 +1440,11 @@ NATIVE_METHOD(transformFeedbackVaryings, 3) {
 
 NATIVE_METHOD(getTransformFeedbackVarying, 2) {
   return getActiveInfo(
-      runtime, jsArgv, GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH, glGetTransformFeedbackVarying);
+      runtime,
+      ARG(0, UEXGLObjectId),
+      ARG(1, GLuint),
+      GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH,
+      glGetTransformFeedbackVarying);
 }
 
 NATIVE_METHOD(pauseTransformFeedback, 0) {
@@ -1610,19 +1550,11 @@ NATIVE_METHOD(uniformBlockBinding, 3) {
 // ----------------------------
 
 NATIVE_METHOD(createVertexArray, 0) {
-  return addFutureToNextBatch(runtime, [] {
-    GLuint vertexArray;
-    glGenVertexArrays(1, &vertexArray);
-    return vertexArray;
-  });
+  return glGenObject(runtime, glGenVertexArrays);
 }
 
-NATIVE_METHOD(deleteVertexArray, 1) {
-  EXJS_UNPACK_ARGV(UEXGLObjectId fVertexArray);
-  addToNextBatch([=] {
-    GLuint vertexArray = lookupObject(fVertexArray);
-    glDeleteVertexArrays(1, &vertexArray);
-  });
+NATIVE_METHOD(deleteVertexArray) {
+  glDeleteObject(ARG(0, UEXGLContextId), glDeleteVertexArrays);
   return nullptr;
 }
 

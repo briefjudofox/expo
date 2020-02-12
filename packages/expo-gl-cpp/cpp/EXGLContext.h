@@ -250,50 +250,18 @@ class EXGLContext {
   }
 
  private:
-  using getActiveInfoFunc =
-      void (*)(GLuint, GLuint, GLsizei, GLsizei *, GLint *, GLenum *, GLchar *);
+  template <typename Func>
+  inline jsi::Value getActiveInfo(jsi::Runtime &, UEXGLObjectId, GLuint, GLenum, Func);
 
-  inline jsi::Value getActiveInfo(jsi::Runtime &, UEXGLObjectId, GLuint, GLenum, getActiveInfoFunc);
-  inline bool glIsObject(UEXGLObjectId id, GLboolean func(GLuint));
-  inline jsi::Value glUnimplemented(std::string name);
+  bool glIsObject(UEXGLObjectId id, std::function<GLboolean(GLuint)>);
+  jsi::Value glCreateObject(jsi::Runtime&, std::function<GLuint()>);
+  jsi::Value glGenObject(jsi::Runtime&, std::function<void(GLsizei, UEXGLObjectId*)>);
+  void glDeleteObject(UEXGLObjectId id, std::function<void(UEXGLObjectId)>);
+  void glDeleteObject(UEXGLObjectId id, std::function<void(GLsizei, const UEXGLObjectId*)>);
+  jsi::Value glUnimplemented(std::string name);
 
-  void installMethods(jsi::Runtime &runtime, jsi::Object &jsGl) {
-    using namespace std::placeholders;
-#define NATIVE_METHOD(name)                                                  \
-  setFunctionOnObject(                                                       \
-      runtime,                                                               \
-      jsGl,                                                                  \
-      #name,                                                                 \
-      [this](                                                                \
-          jsi::Runtime &runtime,                                             \
-          const jsi::Value &jsThis,                                          \
-          const jsi::Value *jsArgv,                                          \
-          size_t argc) {                                                     \
-        try {                                                                \
-          return this->glNativeMethod_##name(runtime, jsThis, jsArgv, argc); \
-        } catch (const std::exception &e) {                                  \
-          throw std::runtime_error(std::string("[" #name "] ") + e.what());  \
-        }                                                                    \
-      });
-#define NATIVE_WEBGL2_METHOD(name)                                                  \
-  if (!this->supportsWebGL2) {                                                      \
-    setFunctionOnObject(                                                            \
-        runtime, jsGl, #name, std::bind(unsupportedWebGL2, #name, _1, _2, _3, _4)); \
-  } else {                                                                          \
-    NATIVE_METHOD(name)                                                             \
-  }
-#include "EXGLNativeMethods.def"
-#undef NATIVE_METHOD
-#undef NATIVE_WEBGL2_METHOD
-  }
-
-  void installConstants(jsi::Runtime &runtime, jsi::Object &jsGl) {
-#define GL_CONSTANT(name) \
-  jsGl.setProperty(       \
-      runtime, jsi::PropNameID::forUtf8(runtime, #name), static_cast<double>(GL_##name));
-#include "EXGLConstants.def"
-#undef GL_CONSTANT
-  };
+  void installMethods(jsi::Runtime &runtime, jsi::Object &jsGl);
+  void installConstants(jsi::Runtime &runtime, jsi::Object &jsGl);
 
     // Standard method wrapper, run on JS thread, return a value
 #define NATIVE_METHOD(name) \
@@ -305,3 +273,4 @@ class EXGLContext {
 };
 
 #include "EXGLContext-inl.h"
+

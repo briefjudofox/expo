@@ -12,21 +12,13 @@
 
 #include <jsi/jsi.h>
 
-inline bool EXGLContext::glIsObject(UEXGLObjectId id, GLboolean func(GLuint)) {
-  GLboolean glResult;
-  addBlockingToNextBatch([&] { glResult = func(lookupObject(id)); });
-  return glResult == GL_TRUE;
-}
-
-inline jsi::Value EXGLContext::glUnimplemented(std::string name) {
-  throw std::runtime_error("EXGL: " + name + "() isn't implemented yet!");
-}
-
-inline jsi::Value EXGLContext::getActiveInfo(
+template <typename Func>
+jsi::Value EXGLContext::getActiveInfo(
+    jsi::Runtime& runtime,
     UEXGLObjectId fProgram,
     GLuint index,
     GLenum lengthParam,
-    getActiveInfoFunc glFunc) {
+    Func glFunc) {
   if (fProgram == 0) {
     return nullptr;
   }
@@ -41,7 +33,7 @@ inline jsi::Value EXGLContext::getActiveInfo(
     GLuint program = lookupObject(fProgram);
     glGetProgramiv(program, lengthParam, &maxNameLength);
     name.resize(maxNameLength);
-    getActiveInfoFunc(program, index, maxNameLength, &length, &size, &type, &name[0]);
+    glFunc(program, index, maxNameLength, &length, &size, &type, &name[0]);
   });
 
   if (strlen(name.c_str()) == 0) { // name.length() may be larger
